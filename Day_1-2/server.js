@@ -1,36 +1,31 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+
 const bcrypt = require('bcryptjs'); // Add password hashing
-const rateLimit = require('express-rate-limit'); // Add rate limiting middleware
+const crypto = require('crypto'); // For generating secure random values
+require('dotenv').config(); // For environment variables
 
-// Use environment variables for sensitive data
 const app = express();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+// Use environment variables for sensitive data
+const JWT_SECRET = process.env.JWT_SECRET;
+const PORT = process.env.PORT || 3000; 
 
-// Use proper data storage
-const users = new Map(); // Better than array for O(1) lookups
+app.use(cors());
+app.use(express.json());
 
-
-
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
-app.use(limiter);
 
-// Secure CORS configuration
-app.use(cors({
-    origin: 'http://localhost:3000',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// Use proper data storage 
+// Use Map for efficient user storage
+// Better than array for O(1) lookups
+const users = new Map(); 
+const tasks = new Map();
 
-app.use(express.json({
-    limit: '10kb' // Prevent large payloads
-}));
 
+// <-----Util Functions----->
 // Improved JWT authentication middleware
 const authenticateToken = (req, res, next) => {
     try {
@@ -55,6 +50,17 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
+// Add input validation middleware
+const validateTaskInput = (req, res, next) => {
+    const { title } = req.body;
+    if (!title || typeof title !== 'string' || title.length < 1) {
+        return res.status(400).json({ message: 'Valid task title is required' });
+    }
+    next();
+};
+
+
+// <-----Routes-Endpoints----->
 // Secure registration endpoint
 app.post('/register', async (req, res) => {
     try {
@@ -101,6 +107,7 @@ app.post('/register', async (req, res) => {
             user: userWithoutPassword
         });
     } catch (error) {
+        console.log("Server error: ", error);
         res.status(500).json({ message: 'Server error' });
     }
 });
@@ -109,14 +116,17 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
+        console.log(`Login attempt for email: ${email}`); 
         const user = users.get(email);
 
         if (!user) {
+            console.log('User not found');
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) {
+            console.log('Invalid password'); 
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
@@ -133,12 +143,14 @@ app.post('/login', async (req, res) => {
             user: userWithoutPassword
         });
     } catch (error) {
+        console.error('Server error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 });
 
 app.get('/user', authenticateToken, (req, res) => {
-    const user = users.find(u => u.id === req.user.id);
+    // Use Map.get() method for efficient user lookup, not array.find()
+    const user = users.get(req.user.email); // Use email as key for user lookup, not ID. Email is unique 
     if (!user) {
         return res.status(404).json({ message: 'User not found' });
     }
@@ -153,8 +165,10 @@ app.get('/user', authenticateToken, (req, res) => {
 app.get('/data', authenticateToken, (req, res) => {
     res.json({
         stats: {
-            totalUsers: users.length,
-            activeUsers: users.length,
+            // Use Map.size property for efficient count of users
+            // No need to convert Map to array and use array.length
+            totalUsers: users.size, // Map.size for O(1) complexity
+            activeUsers: users.size, // Map.size for O(1) complexity
             lastUpdated: new Date().toISOString()
         },
         recentActivity: [
@@ -162,22 +176,6 @@ app.get('/data', authenticateToken, (req, res) => {
         ]
     });
 });
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-
-// Use proper data structure for tasks
-const tasks = new Map();
-
-// Add input validation middleware
-const validateTaskInput = (req, res, next) => {
-    const { title } = req.body;
-    if (!title || typeof title !== 'string' || title.length < 1) {
-        return res.status(400).json({ message: 'Valid task title is required' });
-    }
-    next();
-};
 
 // Secure task endpoints
 app.post('/tasks', authenticateToken, validateTaskInput, (req, res) => {
@@ -220,20 +218,23 @@ app.get('/tasks', authenticateToken, (req, res) => {
 });
 
 // Secure task update endpoint, rewritten poor quality code. Use object destructuring for better readability.
-app.put('/tasks/:id', authenticateToken, validateTaskInput, (req, res) => {
+app.put('/tasks/:id', authenticateToken, (req, res) => {
     // Use Try-Catch for error handling
     try {
         // Use object destructuring to get task ID from request parameters
         const { id } = req.params;
+        const { title, completed } = req.body;
+        
         const task = tasks.get(id);
-        // Check if task exists and belongs to the authenticated user
+        
         if (!task || task.userId !== req.user.id) {
             return res.status(404).json({ message: 'Task not found' });
         }
         // Update task with new data
         const updatedTask = {
             ...task,
-            ...req.body,
+            title: title ?? task.title,
+            completed: completed ?? task.completed,
             updatedAt: new Date()
         };
         // Update task in the Map
@@ -251,18 +252,14 @@ app.delete('/tasks/:id', authenticateToken, (req, res) => {
     try {
         const { id } = req.params;
         const task = tasks.get(id);
-        
+
         if (!task || task.userId !== req.user.id) {
             return res.status(404).json({ message: 'Task not found' });
         }
-        
         // Use Map.delete() method to remove task by ID
         tasks.delete(id);
-        res.status(204).send();
+        res.status(200).json({ message: 'Task deleted successfully' }); // Return a JSON response
     } catch (error) {
         res.status(500).json({ message: 'Error deleting task' });
     }
 });
-
-
-// <-------------------Additional_Improvements------------------->

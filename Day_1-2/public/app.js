@@ -1,328 +1,365 @@
-const API_URL = 'http://localhost:3000'
+// Configuration constants
+const API_URL = 'http://localhost:3000';
 const TOKEN_KEY = 'auth_token';
 
-const setToken = (token) => localStorage.setItem(TOKEN_KEY, token);
-const getToken = () => localStorage.getItem(TOKEN_KEY);
-const removeToken = () => localStorage.removeItem(TOKEN_KEY);
-
-const api = {
-    async register(userData) {
+// Token management service
+// I created this TokenService object to handle all token-related operations.
+// This includes storing, retrieving, and removing tokens from localStorage.
+// By encapsulating these operations, I'm making the code more modular and easier to maintain.
+const TokenService = {
+    // Store token in localStorage
+    set: (token) => {
+        if (!token) return;
         try {
-            const response = await fetch(`${API_URL}/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(userData),
+            localStorage.setItem(TOKEN_KEY, token);
+        } catch (error) {
+            console.error('Failed to store token:', error);
+        }
+    },
+    // Retrieve token from localStorage
+    get: () => {
+        try {
+            return localStorage.getItem(TOKEN_KEY);
+        } catch (error) {
+            console.error('Failed to retrieve token:', error);
+            return null;
+        }
+    },
+    // Remove token from localStorage
+    remove: () => {
+        try {
+            localStorage.removeItem(TOKEN_KEY);
+        } catch (error) {
+            console.error('Failed to remove token:', error);
+        }
+    }
+};
+
+// API service for handling requests
+// The ApiService object is responsible for making all API requests.
+// It includes methods for registering, logging in, getting user data, and managing tasks.
+// By centralizing API requests in this service, I can easily manage headers, handle errors, and update the API URL if needed.
+const ApiService = {
+    // General request method
+    async request(endpoint, options = {}) {
+        const token = TokenService.get();
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` }),
+            ...options.headers
+        };
+
+        try {
+            const response = await fetch(`${API_URL}${endpoint}`, {
+                ...options,
+                headers
             });
+
             const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
+            if (!response.ok) {
+                throw new Error(data.message || `HTTP error! status: ${response.status}`);
+            }
             return data;
         } catch (error) {
-            throw new Error(error.message);
+            console.error(`API Error (${endpoint}):`, error);
+            throw new Error(error.message || 'Network error occurred');
         }
     },
 
-    async login(credentials) {
+    // Authentication endpoints
+    auth: {
+        register: (userData) => ApiService.request('/register', {
+            method: 'POST',
+            body: JSON.stringify(userData)
+        }),
+
+        login: (credentials) => ApiService.request('/login', {
+            method: 'POST',
+            body: JSON.stringify(credentials)
+        }),
+
+        getUserData: () => ApiService.request('/user')
+    },
+
+    // Task endpoints
+    tasks: {
+        getAll: () => ApiService.request('/tasks'),
+        add: (title) => ApiService.request('/tasks', {
+            method: 'POST',
+            body: JSON.stringify({ title })
+        }),
+        update: (id, updates) => ApiService.request(`/tasks/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates)
+        }),
+        delete: (id) => ApiService.request(`/tasks/${id}`, {
+            method: 'DELETE'
+        })
+    }
+};
+
+// DOM element management
+// The DOMService object is used to manage DOM elements.
+// It caches frequently used elements to avoid repeatedly querying the DOM.
+// This improves performance and makes the code more readable.
+const DOMService = {
+    elements: {},
+    // Initialize and cache DOM elements
+    init() {
+        const elementIds = {
+            authForms: 'authForms',
+            loginForm: 'loginForm',
+            registerForm: 'registerForm',
+            showRegister: 'showRegister',
+            showLogin: 'showLogin',
+            loginError: 'loginError',
+            registerError: 'registerError',
+            dashboard: 'dashboard',
+            userName: 'userName',
+            userEmail: 'userEmail',
+            logoutBtn: 'logoutBtn',
+            taskForm: 'taskForm',
+            taskTitle: 'taskTitle',
+            taskList: 'taskList',
+            // apiData: 'apiData' { Uncomment to enable } <---For Debugging Purposes--->
+        };
+
+        for (const [key, id] of Object.entries(elementIds)) {
+            const element = document.getElementById(id);
+            if (!element) {
+                console.error(`Element with id '${id}' not found`);
+            }
+            if (!(key == "apiData")) console.log("Debug Mode Off"); 
+            this.elements[key] = element;
+        }
+
+    }
+};
+
+
+// Task management
+// The TaskManager object handles all task-related operations.
+// This includes adding, updating, deleting, and displaying tasks.
+// By centralizing task management in this object, I can easily modify task behavior without affecting other parts of the code.
+const TaskManager = {
+    // Add a new task
+    async add(title) {
+        if (!title?.trim()) {
+            throw new Error('Task title cannot be empty');
+        }
+        const task = await ApiService.tasks.add(title);
+        this.addToUI(task);
+        return task;
+    },
+    // Add task to UI
+    addToUI(task) {
+        const li = document.createElement('li');
+        li.dataset.id = task.id;
+        li.className = `task-item ${task.completed ? 'completed' : ''} fade-in`;
+
+        li.innerHTML = `
+            <input type="checkbox" ${task.completed ? 'checked' : ''}>
+            <span>${task.title}</span>
+            <button type="button" class="delete-btn">Delete</button>
+        `;
+
+        li.addEventListener('change', this.handleToggle.bind(this));
+        li.querySelector('.delete-btn').addEventListener('click', () => this.delete(task.id));
+
+        DOMService.elements.taskList.appendChild(li);
+    },
+    // Handle task toggle
+    async handleToggle(event) {
+        if (event.target.type === 'checkbox') {
+            const li = event.target.closest('li');
+            const taskId = li.dataset.id;
+            const completed = event.target.checked;
+
+            try {
+                const taskTitle = li.querySelector('span').textContent;
+                await ApiService.tasks.update(taskId, { title: taskTitle, completed });
+                this.updateUI(taskId, { completed });
+            } catch (error) {
+                console.error('Failed to update task:', error);
+                event.target.checked = !completed;
+            }
+        }
+    },
+    // Update task in UI
+    updateUI(id, updates) {
+        const taskElement = DOMService.elements.taskList.querySelector(`[data-id="${id}"]`);
+        if (!taskElement) return;
+
+        if (updates.completed !== undefined) {
+            taskElement.querySelector('input[type="checkbox"]').checked = updates.completed;
+            taskElement.classList.toggle('completed', updates.completed);
+        }
+    },
+    // Delete task
+    async delete(id) {
         try {
-            const response = await fetch(`${API_URL}/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(credentials),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
+            await ApiService.tasks.delete(id);
+            this.removeFromUI(id);
         } catch (error) {
-            throw new Error(error.message);
+            console.error('Failed to delete task:', error);
+        }
+    },
+    // Remove task from UI
+    removeFromUI(id) {
+        const taskElement = DOMService.elements.taskList.querySelector(`[data-id="${id}"]`);
+        if (!taskElement) return;
+
+        taskElement.classList.add('fade-out');
+        setTimeout(() => taskElement.remove(), 300);
+    }
+};
+
+// Authentication management
+// The AuthManager object is responsible for handling user authentication.
+// It includes methods for logging in, registering, and logging out.
+// By centralizing authentication logic in this object, I can easily manage user sessions and security.
+const AuthManager = {
+    async handleLogin(e) {
+
+        e.preventDefault();
+        const email = document.getElementById('loginEmail').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!email || !password) {
+            DOMService.elements.loginError.textContent = 'Please fill in all fields';
+            return;
+        }
+
+        try {
+            const { token, user } = await ApiService.auth.login({ email, password });
+            TokenService.set(token);
+            UIManager.showDashboard(user);
+        } catch (error) {
+            DOMService.elements.loginError.textContent = error.message;
         }
     },
 
-    async getUserData() {
+    async handleRegister(e) {
+        e.preventDefault();
+        const name = document.getElementById('registerName').value.trim();
+        const email = document.getElementById('registerEmail').value.trim();
+        const password = document.getElementById('registerPassword').value;
+
+        if (!name || !email || !password) {
+            DOMService.elements.registerError.textContent = 'Please fill in all fields';
+            return;
+        }
+
+        if (password.length < 8) {
+            DOMService.elements.registerError.textContent = 'Password must be at least 8 characters';
+            return;
+        }
+
         try {
-            const response = await fetch(`${API_URL}/user`, {
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
+            const { token, user } = await ApiService.auth.register({ name, email, password });
+            TokenService.set(token);
+            UIManager.showDashboard(user);
         } catch (error) {
-            throw new Error(error.message);
+            DOMService.elements.registerError.textContent = error.message;
         }
     },
 
-    async getApiData() {
+    handleLogout(e) {
+        e.preventDefault();
+        TokenService.remove();
+        UIManager.showAuth();
+
+    }
+};
+
+// UI state management
+// The UIManager object is responsible for managing the UI state.
+// It includes methods for showing the dashboard, showing the authentication forms, and updating the UI based on user actions.
+// By centralizing UI management in this object, I can easily control the user interface and ensure a consistent user experience.
+const UIManager = {
+    async showDashboard(user) {
+        // console.log('Showing dashboard for user:', user); // Debug log
+        DOMService.elements.authForms.style.display = 'none';
+        DOMService.elements.dashboard.style.display = 'block';
+        DOMService.elements.dashboard.classList.add('visible');
+        DOMService.elements.logoutBtn.style.display = 'block';
+
+        DOMService.elements.userName.textContent = user.name;
+        DOMService.elements.userEmail.textContent = user.email;
+
         try {
-            const response = await fetch(`${API_URL}/data`, {
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
+            const tasks = await ApiService.tasks.getAll();
+            DOMService.elements.taskList.innerHTML = '';
+            tasks.forEach(task => TaskManager.addToUI(task));
+
+            // <---For Debugging Purposes--->
+            // Fetch and display API data { Uncomment to enable } 
+            // const apiData = await ApiService.request('/data');
+            // DOMService.elements.apiData.textContent = JSON.stringify(apiData, null, 2);
         } catch (error) {
-            throw new Error(error.message);
+            console.error('Failed to load tasks:', error);
         }
     },
 
-    async getTasks() {
+    showAuth() {
+        // console.log('Showing auth forms'); // Debug log
+        DOMService.elements.authForms.style.display = 'block';
+        DOMService.elements.dashboard.style.display = 'none';
+        DOMService.elements.logoutBtn.style.display = 'none';
+        DOMService.elements.loginForm.reset();
+        DOMService.elements.registerForm.reset();
+        DOMService.elements.loginError.textContent = '';
+        DOMService.elements.registerError.textContent = '';
+    }
+};
+
+// Initialize application
+// This is the main entry point of the application.
+// It initializes the DOM elements, sets up event listeners, and checks the authentication status to determine which UI to display.
+// By using this initialization pattern, I can ensure that the application is properly set up before any user interaction occurs.
+document.addEventListener('DOMContentLoaded', () => {
+
+    // Initialize DOM elements
+    DOMService.init();
+    
+    // Set up event listeners
+    DOMService.elements.loginForm.addEventListener('submit', AuthManager.handleLogin);
+    DOMService.elements.registerForm.addEventListener('submit', AuthManager.handleRegister);
+    DOMService.elements.logoutBtn.addEventListener('click', AuthManager.handleLogout);
+    DOMService.elements.taskForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = DOMService.elements.taskTitle.value.trim();
         try {
-            const response = await fetch(`${API_URL}/tasks`, {
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
+            await TaskManager.add(title);
+            DOMService.elements.taskTitle.value = '';
         } catch (error) {
-            throw new Error(error.message);
+            console.error('Failed to add task:', error);
         }
-    },
+    });
 
-    async addTask(title) {
-        try {
-            const response = await fetch(`${API_URL}/tasks`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-                body: JSON.stringify({ title }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
+    // Handle form visibility toggling
+    DOMService.elements.showRegister.addEventListener('click', (e) => {
+        e.preventDefault();
+        DOMService.elements.loginForm.style.display = 'none';
+        DOMService.elements.registerForm.style.display = 'block';
+    });
 
-    async updateTask(id, updates) {
-        try {
-            const response = await fetch(`${API_URL}/tasks/${id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-                body: JSON.stringify(updates),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
+    DOMService.elements.showLogin.addEventListener('click', (e) => {
+        e.preventDefault();
+        DOMService.elements.registerForm.style.display = 'none';
+        DOMService.elements.loginForm.style.display = 'block';
+    });
 
-    async deleteTask(id) {
-        try {
-            const response = await fetch(`${API_URL}/tasks/${id}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            if (!response.ok) throw new Error('Error deleting task');
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-};
-
-const elements = {
-    authForms: document.getElementById('authForms'),
-    loginForm: document.getElementById('loginForm'),
-    registerForm: document.getElementById('registerForm'),
-    showRegister: document.getElementById('showRegister'),
-    showLogin: document.getElementById('showLogin'),
-    loginError: document.getElementById('loginError'),
-    registerError: document.getElementById('registerError'),
-    dashboard: document.getElementById('dashboard'),
-    userName: document.getElementById('userName'),
-    userEmail: document.getElementById('userEmail'),
-    apiData: document.getElementById('apiData'),
-    logoutBtn: document.getElementById('logoutBtn'),
-    taskForm: document.getElementById('taskForm'),
-    taskTitle: document.getElementById('taskTitle'),
-    taskList: document.getElementById('taskList'),
-};
-
-const handleLogin = async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('loginEmail').value;
-    const password = document.getElementById('loginPassword').value;
-
-    try {
-        const { token, user } = await api.login({ email, password });
-        localStorage.setItem('user_password', password);
-        localStorage.setItem('user_email', email);
-        setToken(token);
-        showDashboard(user);
-    } catch (error) {
-        elements.loginError.textContent = error.message;
-    }
-};
-
-const handleRegister = async (e) => {
-    e.preventDefault();
-    const name = document.getElementById('registerName').value;
-    const email = document.getElementById('registerEmail').value;
-    const password = document.getElementById('registerPassword').value;
-
-    if (password.length > 0) {
-        try {
-            console.log('New user password:', password);
-            
-            const { token, user } = await api.register({ 
-                name, 
-                email, 
-                password,
-            });
-            setToken(token);
-            sessionStorage.setItem('credentials', JSON.stringify({email, password}));
-            showDashboard(user);
-        } catch (error) {
-            elements.registerError.textContent = error.message;
-        }
-    }
-};
-
-const handleLogout = (e) => {
-    e.preventDefault();
-    removeToken();
-    showAuth();
-};
-
-const handleTaskSubmit = async (e) => {
-    e.preventDefault();
-    const title = elements.taskTitle.value;
-    try {
-        const task = await api.addTask(title);
-        addTaskToUI(task);
-        elements.taskTitle.value = '';
-    } catch (error) {
-        console.error(error.message);
-    }
-};
-
-const handleTaskToggle = async (id, completed) => {
-    updateTaskInUI(id, { completed });
-    try {
-        await api.updateTask(id, { completed });
-    } catch (error) {
-        console.error(error.message);
-    }
-};
-
-const handleTaskDelete = async (id) => {
-    try {
-        await api.deleteTask(id);
-        removeTaskFromUI(id);
-    } catch (error) {
-        console.error(error.message);
-    }
-};
-
-const addTaskToUI = (task) => {
-    const li = document.createElement('li');
-    li.dataset.id = task.id;
-    li.className = task.completed ? 'completed fade-in' : 'fade-in';
-    li.innerHTML = `
-        <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="handleTaskToggle(${task.id}, this.checked)">
-        <span>${task.title}</span>
-        <button onclick="handleTaskDelete(${task.id})">Delete</button>
-    `;
-    elements.taskList.appendChild(li);
-};
-
-const updateTaskInUI = (id, updates) => {
-    const taskElement = elements.taskList.querySelector(`[data-id="${id}"]`);
-    if (updates.completed !== undefined) {
-        taskElement.querySelector('input[type="checkbox"]').checked = updates.completed;
-        taskElement.classList.toggle('completed', updates.completed);
-    }
-};
-
-const removeTaskFromUI = (id) => {
-    const taskElement = elements.taskList.querySelector(`[data-id="${id}"]`);
-    taskElement.style.transform = 'translateX(100%)';
-    taskElement.style.opacity = '0';
-    setTimeout(() => taskElement.remove(), 300);
-};
-
-const loadTasks = async () => {
-    try {
-        const tasks = await api.getTasks();
-        tasks.forEach(addTaskToUI);
-    } catch (error) {
-        console.error(error.message);
-    }
-};
-
-const showDashboard = async (user) => {
-    elements.authForms.style.display = 'none';
-    elements.dashboard.style.display = 'block';
-    elements.logoutBtn.style.display = 'block';
-    elements.userName.textContent = user.name;
-    elements.userEmail.textContent = user.email;
-
-    try {
-        const apiData = await api.getApiData();
-        elements.apiData.textContent = JSON.stringify(apiData, null, 2);
-    } catch (error) {
-        elements.apiData.textContent = 'Error loading data';
-    }
-    await loadTasks();
-};
-
-elements.dashboard.classList.add('visible');
-
-const showAuth = () => {
-    elements.authForms.style.display = 'block';
-    elements.dashboard.style.display = 'none';
-    elements.logoutBtn.style.display = 'none';
-    elements.loginForm.reset();
-    elements.registerForm.reset();
-};
-
-
-elements.loginForm.addEventListener('submit', handleLogin);
-elements.registerForm.addEventListener('submit', handleRegister);
-elements.logoutBtn.addEventListener('click', handleLogout);
-
-elements.showRegister.addEventListener('click', (e) => {
-    e.preventDefault();
-    elements.loginForm.style.display = 'none';
-    elements.registerForm.style.display = 'block';
-});
-elements.showLogin.addEventListener('click', (e) => {
-    e.preventDefault();
-    elements.registerForm.style.display = 'none';
-    elements.loginForm.style.display = 'block';
-});
-elements.taskForm.addEventListener('submit', handleTaskSubmit);
-
-const init = async () => {
-    const token = getToken();
+    // Check authentication status and initialize app
+    const token = TokenService.get();
     if (token) {
-        try {
-            const user = await api.getUserData();
-            showDashboard(user);
-        } catch (error) {
-            removeToken();
-            showAuth();
-        }
+        ApiService.auth.getUserData()
+            .then(user => UIManager.showDashboard(user))
+            .catch(() => {
+                TokenService.remove();
+                UIManager.showAuth();
+            });
     } else {
-        showAuth();
+        UIManager.showAuth();
     }
-};
-
-init();
+});
