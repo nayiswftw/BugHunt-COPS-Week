@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:3000'
+const API_URL = 'http://localhost:3000';
 const TOKEN_KEY = 'auth_token';
 
 const setToken = (token) => localStorage.setItem(TOKEN_KEY, token);
@@ -6,192 +6,87 @@ const getToken = () => localStorage.getItem(TOKEN_KEY);
 const removeToken = () => localStorage.removeItem(TOKEN_KEY);
 
 const api = {
-    async register(userData) {
+    request: async (endpoint, method = 'GET', body) => {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = getToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const options = { method, headers };
+        if (body) options.body = JSON.stringify(body);
         try {
-            const response = await fetch(`${API_URL}/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(userData),
-            });
+            const response = await fetch(`${API_URL}${endpoint}`, options);
             const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
+            if (!response.ok) throw new Error(data.message || `Request failed: ${response.status}`);
             return data;
         } catch (error) {
-            throw new Error(error.message);
+            console.error(`API request failed for ${endpoint}:`, error);
+            throw error;
         }
     },
-
-    async login(credentials) {
-        try {
-            const response = await fetch(`${API_URL}/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(credentials),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-    async getUserData() {
-        try {
-            const response = await fetch(`${API_URL}/user`, {
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-    async getApiData() {
-        try {
-            const response = await fetch(`${API_URL}/data`, {
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-    async getTasks() {
-        try {
-            const response = await fetch(`${API_URL}/tasks`, {
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-    async addTask(title) {
-        try {
-            const response = await fetch(`${API_URL}/tasks`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-                body: JSON.stringify({ title }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-    async updateTask(id, updates) {
-        try {
-            const response = await fetch(`${API_URL}/tasks/${id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-                body: JSON.stringify(updates),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message);
-            return data;
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
-    async deleteTask(id) {
-        try {
-            const response = await fetch(`${API_URL}/tasks/${id}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`,
-                },
-            });
-            if (!response.ok) throw new Error('Error deleting task');
-        } catch (error) {
-            throw new Error(error.message);
-        }
-    },
-
+    register: (userData) => api.request('/register', 'POST', userData),
+    login: (credentials) => api.request('/login', 'POST', credentials),
+    getUserData: () => api.request('/user'),
+    getApiData: () => api.request('/data'),
+    getTasks: () => api.request('/tasks'),
+    addTask: (title, category) => api.request('/tasks', 'POST', { title, category }),
+    updateTask: (id, updates) => api.request(`/tasks/${id}`, 'PUT', updates),
+    deleteTask: (id) => api.request(`/tasks/${id}`, 'DELETE'),
 };
+
+const getElement = (id) => document.getElementById(id) || console.warn(`Element with id "${id}" not found.`);
 
 const elements = {
-    authForms: document.getElementById('authForms'),
-    loginForm: document.getElementById('loginForm'),
-    registerForm: document.getElementById('registerForm'),
-    showRegister: document.getElementById('showRegister'),
-    showLogin: document.getElementById('showLogin'),
-    loginError: document.getElementById('loginError'),
-    registerError: document.getElementById('registerError'),
-    dashboard: document.getElementById('dashboard'),
-    userName: document.getElementById('userName'),
-    userEmail: document.getElementById('userEmail'),
-    apiData: document.getElementById('apiData'),
-    logoutBtn: document.getElementById('logoutBtn'),
-    taskForm: document.getElementById('taskForm'),
-    taskTitle: document.getElementById('taskTitle'),
-    taskList: document.getElementById('taskList'),
+    authForms: getElement('authForms'),
+    loginForm: getElement('loginForm'),
+    registerForm: getElement('registerForm'),
+    showRegister: getElement('showRegister'),
+    showLogin: getElement('showLogin'),
+    loginError: getElement('loginError'),
+    registerError: getElement('registerError'),
+    dashboard: getElement('dashboard'),
+    userName: getElement('userName'),
+    userEmail: getElement('userEmail'),
+    apiData: getElement('apiData'),
+    logoutBtn: getElement('logoutBtn'),
+    taskForm: getElement('taskForm'),
+    taskTitle: getElement('taskTitle'),
+    taskList: getElement('taskList'),
+    taskCategory: getElement('taskCategory')
 };
+
+const showElement = (element) => element && (element.style.display = 'block');
+const hideElement = (element) => element && (element.style.display = 'none');
+const clearError = (element) => element && (element.textContent = '');
+const displayError = (element, message) => element && (element.textContent = message);
 
 const handleLogin = async (e) => {
     e.preventDefault();
-    const email = document.getElementById('loginEmail').value;
-    const password = document.getElementById('loginPassword').value;
-
+    const { loginForm, loginError } = elements;
+    if (!loginForm) return;
     try {
-        const { token, user } = await api.login({ email, password });
-        localStorage.setItem('user_password', password);
-        localStorage.setItem('user_email', email);
+        const { token, user } = await api.login({ email: loginForm.loginEmail.value, password: loginForm.loginPassword.value });
         setToken(token);
-        showDashboard(user);
+        clearError(loginError);
+        await showDashboard(user);
     } catch (error) {
-        elements.loginError.textContent = error.message;
+        displayError(loginError, error.message);
     }
 };
 
 const handleRegister = async (e) => {
     e.preventDefault();
-    const name = document.getElementById('registerName').value;
-    const email = document.getElementById('registerEmail').value;
-    const password = document.getElementById('registerPassword').value;
-
-    if (password.length > 0) {
-        try {
-            console.log('New user password:', password);
-            
-            const { token, user } = await api.register({ 
-                name, 
-                email, 
-                password,
-            });
-            setToken(token);
-            sessionStorage.setItem('credentials', JSON.stringify({email, password}));
-            showDashboard(user);
-        } catch (error) {
-            elements.registerError.textContent = error.message;
-        }
+    const { registerForm, registerError } = elements;
+    if (!registerForm) return;
+    try {
+        const { token, user } = await api.register({
+            name: registerForm.registerName.value,
+            email: registerForm.registerEmail.value,
+            password: registerForm.registerPassword.value,
+        });
+        setToken(token);
+        clearError(registerError);
+        await showDashboard(user);
+    } catch (error) {
+        displayError(registerError, error.message);
     }
 };
 
@@ -203,22 +98,30 @@ const handleLogout = (e) => {
 
 const handleTaskSubmit = async (e) => {
     e.preventDefault();
-    const title = elements.taskTitle.value;
+    const { taskTitle, taskList, taskCategory } = elements;
+    if (!taskTitle || !taskList || !taskCategory) return;
     try {
-        const task = await api.addTask(title);
-        addTaskToUI(task);
-        elements.taskTitle.value = '';
+        const task = await api.addTask(taskTitle.value, taskCategory.value);
+        const li = createTaskElement(task);
+        taskList.appendChild(li);
+        taskTitle.value = '';
+
+        await loadApiData();
+
     } catch (error) {
-        console.error(error.message);
+        console.error('Failed to add task:', error.message);
     }
+
 };
 
-const handleTaskToggle = async (id, completed) => {
+const handleTaskToggle = async (id, event) => {
+    const completed = event.target.checked;
     updateTaskInUI(id, { completed });
     try {
         await api.updateTask(id, { completed });
     } catch (error) {
-        console.error(error.message);
+        console.error('Failed to update task:', error.message);
+        updateTaskInUI(id, { completed: !completed });
     }
 };
 
@@ -226,103 +129,163 @@ const handleTaskDelete = async (id) => {
     try {
         await api.deleteTask(id);
         removeTaskFromUI(id);
+
+        await loadApiData();
+
     } catch (error) {
-        console.error(error.message);
+        console.error('Failed to delete task:', error.message);
     }
 };
 
-const addTaskToUI = (task) => {
+elements.taskList?.addEventListener('click', (event) => {
+    if (event.target.tagName === 'INPUT' && event.target.type === 'checkbox') {
+        const taskId = event.target.closest('li').dataset.id;
+        handleTaskToggle(taskId, event);
+    } else if (event.target.tagName === 'BUTTON') {
+        const taskId = event.target.closest('li').dataset.id;
+        handleTaskDelete(taskId);
+    }
+});
+
+const createTaskElement = (task) => {
     const li = document.createElement('li');
     li.dataset.id = task.id;
     li.className = task.completed ? 'completed fade-in' : 'fade-in';
-    li.innerHTML = `
-        <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="handleTaskToggle(${task.id}, this.checked)">
-        <span>${task.title}</span>
-        <button onclick="handleTaskDelete(${task.id})">Delete</button>
-    `;
-    elements.taskList.appendChild(li);
-};
 
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = task.completed;
+
+    const span = document.createElement('span');
+    span.textContent = task.title;
+
+    const categorySpan = document.createElement('span');
+    categorySpan.className = 'task-category';
+    categorySpan.textContent = `(${task.category})`;
+
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'Delete';
+
+    li.appendChild(checkbox);
+    li.appendChild(span);
+    li.appendChild(categorySpan);
+    li.appendChild(deleteButton);
+
+    return li;
+};
 const updateTaskInUI = (id, updates) => {
-    const taskElement = elements.taskList.querySelector(`[data-id="${id}"]`);
+    const { taskList } = elements;
+    if (!taskList) return;
+    const taskElement = taskList.querySelector(`[data-id="${id}"]`);
+    if (!taskElement) return;
+
     if (updates.completed !== undefined) {
-        taskElement.querySelector('input[type="checkbox"]').checked = updates.completed;
+        const checkbox = taskElement.querySelector('input[type="checkbox"]');
+        checkbox.checked = updates.completed;
         taskElement.classList.toggle('completed', updates.completed);
     }
 };
 
 const removeTaskFromUI = (id) => {
-    const taskElement = elements.taskList.querySelector(`[data-id="${id}"]`);
+    const { taskList } = elements;
+    if (!taskList) return;
+    const taskElement = taskList.querySelector(`[data-id="${id}"]`);
+    if (!taskElement) return;
+
     taskElement.style.transform = 'translateX(100%)';
     taskElement.style.opacity = '0';
-    setTimeout(() => taskElement.remove(), 300);
+    setTimeout(() => {
+        if (taskList && taskElement.parentNode === taskList) {
+            taskList.removeChild(taskElement);
+        }
+    }, 300);
 };
 
 const loadTasks = async () => {
     try {
         const tasks = await api.getTasks();
-        tasks.forEach(addTaskToUI);
+        const { taskList } = elements;
+        if (!taskList) return;
+        tasks.forEach(task => {
+            const li = createTaskElement(task);
+            taskList.appendChild(li);
+        });
     } catch (error) {
-        console.error(error.message);
+        console.error('Failed to load tasks:', error.message);
     }
+};
+
+// <--- CATEGORY STATS --->
+const loadApiData = async () => {
+    const { stats: { tasksByCategory } = {} } = await api.getApiData();
+    if (!elements.apiData || !tasksByCategory) return;
+
+    const categoryStats = Object.entries(tasksByCategory)
+        .map(([category, count]) => `${category}: ${count}`)
+        .join(' • ');
+
+    elements.apiData.innerHTML += categoryStats;
+    elements.apiData.classList.toggle('category-data', Boolean(tasksByCategory));
 };
 
 const showDashboard = async (user) => {
-    elements.authForms.style.display = 'none';
-    elements.dashboard.style.display = 'block';
-    elements.logoutBtn.style.display = 'block';
-    elements.userName.textContent = user.name;
-    elements.userEmail.textContent = user.email;
+    const { authForms, dashboard, logoutBtn, userName, userEmail, apiData } = elements;
+    dashboard?.classList.add('visible');
+    hideElement(authForms);
+    showElement(dashboard);
+    showElement(logoutBtn);
 
-    try {
-        const apiData = await api.getApiData();
-        elements.apiData.textContent = JSON.stringify(apiData, null, 2);
-    } catch (error) {
-        elements.apiData.textContent = 'Error loading data';
-    }
+    if (userName) userName.textContent = user.name;
+    if (userEmail) userEmail.textContent = user.email;
+
     await loadTasks();
-};
 
-elements.dashboard.classList.add('visible');
+};
 
 const showAuth = () => {
-    elements.authForms.style.display = 'block';
-    elements.dashboard.style.display = 'none';
-    elements.logoutBtn.style.display = 'none';
-    elements.loginForm.reset();
-    elements.registerForm.reset();
+    const { authForms, dashboard, logoutBtn, loginForm, registerForm } = elements;
+    showElement(authForms);
+    hideElement(dashboard);
+    hideElement(logoutBtn);
+
+    loginForm?.reset();
+    registerForm?.reset();
 };
 
+const setupEventListeners = () => {
+    const { loginForm, registerForm, logoutBtn, showRegister, showLogin, taskForm } = elements;
 
-elements.loginForm.addEventListener('submit', handleLogin);
-elements.registerForm.addEventListener('submit', handleRegister);
-elements.logoutBtn.addEventListener('click', handleLogout);
-
-elements.showRegister.addEventListener('click', (e) => {
-    e.preventDefault();
-    elements.loginForm.style.display = 'none';
-    elements.registerForm.style.display = 'block';
-});
-elements.showLogin.addEventListener('click', (e) => {
-    e.preventDefault();
-    elements.registerForm.style.display = 'none';
-    elements.loginForm.style.display = 'block';
-});
-elements.taskForm.addEventListener('submit', handleTaskSubmit);
+    loginForm?.addEventListener('submit', handleLogin);
+    registerForm?.addEventListener('submit', handleRegister);
+    logoutBtn?.addEventListener('click', handleLogout);
+    showRegister?.addEventListener('click', (e) => {
+        e.preventDefault();
+        hideElement(elements.loginForm);
+        showElement(elements.registerForm);
+    });
+    showLogin?.addEventListener('click', (e) => {
+        e.preventDefault();
+        hideElement(elements.registerForm);
+        showElement(elements.loginForm);
+    });
+    taskForm?.addEventListener('submit', handleTaskSubmit);
+};
 
 const init = async () => {
+    setupEventListeners();
     const token = getToken();
-    if (token) {
-        try {
+    try {
+        if (token) {
             const user = await api.getUserData();
-            showDashboard(user);
-        } catch (error) {
-            removeToken();
+            await showDashboard(user);
+        } else {
             showAuth();
         }
-    } else {
+    } catch (error) {
+        removeToken();
         showAuth();
     }
 };
 
 init();
+

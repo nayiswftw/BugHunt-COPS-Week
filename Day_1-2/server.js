@@ -1,166 +1,173 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
 const app = express();
-const PORT = 3000;
-const JWT_SECRET = 'your-secret-key';
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET;
 
-const users = [];
+let users = [];
+let tasks = [];
 
 app.use(cors());
 app.use(express.json());
+app.use(rateLimit({ windowMs: 60 * 1000, max: 100 }));
 
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
-        return res.status(401).json({ message: 'No token provided' });
-    }
-
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) {
-            return res.status(403).json({ message: 'Invalid token' });
-        }
-        req.user = user;
-        next();
-    });
+const errorHandler = (err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ message: 'Something went wrong!' });
 };
 
-app.post('/register', async (req, res) => {
+const authenticateToken = (req, res, next) => {
     try {
-        const { name, email, password } = req.body;
+        const authHeader = req.headers['authorization'];
+        if (!authHeader) return res.status(401).json({ message: 'Authentication required' });
 
-        if (users.find(u => u.email === email)) {
-            return res.status(400).json({ message: 'User already exists' });
-        }
+        const token = authHeader.split(' ')[1];
+        if (!token) return res.status(401).json({ message: 'Invalid token format' });
 
-        const user = {
-            id: users.length + 1,
-            name,
-            email,
-            password: password
-        };
-
-        users.push(user);
-
-        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET);
-
-        res.status(201).json({
-            token,
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                password: user.password
-            }
+        jwt.verify(token, JWT_SECRET, (err, user) => {
+            if (err) return res.status(403).json({ message: 'Invalid or expired token' });
+            req.user = user;
+            next();
         });
     } catch (error) {
-        res.status(500).json({ message: 'Error creating user' });
+        console.log('Authentication error:', error);
+        next(error);
     }
-});
+};
 
-app.post('/login', async (req, res) => {
+
+
+const handleRegistration = async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+        if (!name || !email || !password) return res.status(400).json({ message: 'All fields required' });
+        if (users.some(u => u.email === email)) return res.status(409).json({ message: 'Email already registered' });
+
+        if (password.length < 8) { return res.status(400).json({ message: 'Password must be at least 8 characters long' }); }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newUser = { id: users.length + 1, name, email, password: hashedPassword };
+        users.push(newUser);
+
+        const token = jwt.sign({ id: newUser.id }, JWT_SECRET, { expiresIn: '1h' });
+        res.status(201).json({ message: 'User registered', token, user: { id: newUser.id, name: newUser.name, email: newUser.email } });
+
+    } catch (error) {
+        console.error('Registration error:', error);
+        next(error);
+    }
+};
+
+const handleLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
         const user = users.find(u => u.email === email);
-        if (!user) {
-            return res.status(400).json({ message: 'User not found' });
-        }
+        if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
-        const validPassword = (password === user.password);
-        if (!validPassword) {
-            return res.status(400).json({ message: 'Invalid password' });
-        }
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) return res.status(401).json({ message: 'Invalid credentials' });
 
-        const token = jwt.sign({ 
-            id: user.id, 
-            email: user.email,
-            password: user.password
-        }, JWT_SECRET);
+        const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '1h' });
+        res.json({ message: 'Logged in', token, user: { id: user.id, name: user.name, email: user.email } });
 
-        res.json({
-            token,
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                password: user.password.substring(0, 3)
-            }
-        });
     } catch (error) {
-        res.status(500).json({ message: 'Error logging in' });
+        console.error('Login error:', error);
+        next(error);
     }
-});
+};
 
-app.get('/user', authenticateToken, (req, res) => {
+const getUserProfile = (req, res) => {
     const user = users.find(u => u.id === req.user.id);
-    if (!user) {
-        return res.status(404).json({ message: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ id: user.id, name: user.name, email: user.email });
+};
 
-    res.json({
-        id: user.id,
-        name: user.name,
-        email: user.email
-    });
-});
+const getDashboardData = (req, res) => {
+    const userTasks = tasks.filter(task => task.userId === req.user.id);
+    const categoryStats = userTasks.reduce((acc, task) => {
+        acc[task.category] = (acc[task.category] || 0) + 1;
+        return acc;
+    }, {});
 
-app.get('/data', authenticateToken, (req, res) => {
     res.json({
         stats: {
             totalUsers: users.length,
             activeUsers: users.length,
-            lastUpdated: new Date().toISOString()
+            lastUpdated: new Date().toISOString(),
+            tasksByCategory: categoryStats
         },
         recentActivity: [
             { type: 'login', user: req.user.email, timestamp: new Date().toISOString() }
         ]
     });
-});
+};
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+const TASK_CATEGORIES = ['Personal', 'Home', 'Shopping', 'Work'];
 
-const tasks = [];
-
-app.post('/tasks', authenticateToken, (req, res) => {
-    const { title } = req.body;
-    const task = {
+const createTask = (req, res) => {
+    const { title, category } = req.body;
+    if (!title) return res.status(400).json({ message: 'Title required' });
+    if (category && !TASK_CATEGORIES.includes(category)) {
+        return res.status(400).json({ message: 'Invalid category' });
+    }
+    const newTask = {
         id: tasks.length + 1,
         title,
+        category: category,
         completed: false,
         userId: req.user.id,
+        createdAt: new Date().toISOString()
     };
-    tasks.push(task);
-    res.status(201).json(task);
-});
+    tasks.push(newTask);
+    res.status(201).json(newTask);
+};
 
-app.get('/tasks', authenticateToken, (req, res) => {
+const getUserTasks = (req, res) => {
     const userTasks = tasks.filter(task => task.userId === req.user.id);
     res.json(userTasks);
-});
+};
 
-app.put('/tasks/:id', authenticateToken, (req, res) => {
+const updateTask = (req, res) => {
     const { id } = req.params;
     const { title, completed } = req.body;
-    const task = tasks.find(task => task.id === parseInt(id) && task.userId === req.user.id);
-    if (!task) {
-        return res.status(404).json({ message: 'Task not found' });
-    }
-    task.title = title !== undefined ? title : task.title;
-    task.completed = completed !== undefined ? completed : task.completed;
-    res.json(task);
-});
 
-app.delete('/tasks/:id', authenticateToken, (req, res) => {
+    const taskId = parseInt(id);
+    if (isNaN(taskId)) return res.status(400).json({ message: 'Invalid task ID' });
+
+    const task = tasks.find(task => task.id === taskId && task.userId === req.user.id);
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+
+    if (title !== undefined) task.title = title;
+    if (completed !== undefined) task.completed = completed;
+
+    res.json(task);
+};
+
+const deleteTask = (req, res) => {
     const { id } = req.params;
-    const taskIndex = tasks.findIndex(task => task.id === parseInt(id) && task.userId === req.user.id);
-    if (taskIndex === -1) {
-        return res.status(404).json({ message: 'Task not found' });
-    }
+    const taskId = parseInt(id);
+    if (isNaN(taskId)) return res.status(400).json({ message: 'Invalid task ID' });
+
+    const taskIndex = tasks.findIndex(task => task.id === taskId && task.userId === req.user.id);
+    if (taskIndex === -1) return res.status(404).json({ message: 'Task not found' });
+
     tasks.splice(taskIndex, 1);
-    res.status(204).send();
-});
+    res.json({ message: 'Task deleted successfully' });
+};
+
+app.post('/register', handleRegistration);
+app.post('/login', handleLogin);
+app.get('/user', authenticateToken, getUserProfile);
+app.get('/data', authenticateToken, getDashboardData);
+app.post('/tasks', authenticateToken, createTask);
+app.get('/tasks', authenticateToken, getUserTasks);
+app.put('/tasks/:id', authenticateToken, updateTask);
+app.delete('/tasks/:id', authenticateToken, deleteTask);
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.use(errorHandler); 
